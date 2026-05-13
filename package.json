@@ -1,0 +1,12 @@
+{
+  "name": "subtitle-translator",
+  "version": "1.0.0",
+  "description": "AI 字幕翻译工具",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
