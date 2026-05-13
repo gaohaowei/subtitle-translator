@@ -231,6 +231,9 @@
     </div>
     <div class="form-error" id="loginError"></div>
     <button class="btn-auth" onclick="doLogin()">登 录</button>
+    <div style="text-align:center;margin-top:14px;">
+      <button style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:0.9rem;text-decoration:underline;" onclick="enterAsGuest()">跳过登录，直接使用</button>
+    </div>
     <div class="auth-switch">还没有账号？<a onclick="showPage('register')">立即注册</a></div>
   </div>
 </div>
@@ -267,12 +270,13 @@
     <div class="app-header">
       <h1>🎬 AI 字幕翻译</h1>
       <div class="user-bar">
-        <div class="credits">
+        <div class="credits" id="creditsBox">
           💎 <strong id="dispCredits">0</strong> 字符点数 &nbsp; ⭐ <span class="pts" id="dispPoints">0</span> 积分
         </div>
         <span id="dispUsername" style="color:var(--text2)"></span>
+        <button id="btnLoginHeader" class="btn-admin" onclick="showPage('login')" style="display:none;">🔑 登录</button>
         <button class="btn-admin hidden" id="btnAdmin" onclick="showPage('admin')">⚙ 管理后台</button>
-        <button class="btn-logout" onclick="doLogout()">退出</button>
+        <button class="btn-logout" id="btnLogout" onclick="doLogout()">退出</button>
       </div>
     </div>
 
@@ -426,9 +430,12 @@ async function api(url, options = {}) {
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(url, { ...options, headers });
   const data = await res.json();
-  if (data.error && typeof data.error === 'string' && res.status === 401) {
-    token = null; localStorage.removeItem('token'); showPage('login');
-    showToast('登录已过期，请重新登录', 'info');
+  if (data.error && typeof data.error === 'string') {
+    if (res.status === 401 && token) {
+      // 只有已登录用户才跳转登录页
+      token = null; localStorage.removeItem('token'); showPage('login');
+      showToast('登录已过期，请重新登录', 'info');
+    }
   }
   return { status: res.status, data };
 }
@@ -508,12 +515,30 @@ function doLogout() {
 
 // ============ 进入应用 ============
 function enterApp() {
-  document.getElementById('dispUsername').textContent = currentUser.username;
-  document.getElementById('dispCredits').textContent = currentUser.charCredits.toLocaleString();
-  document.getElementById('dispPoints').textContent = currentUser.points.toLocaleString();
-  if (currentUser.role === 'admin') document.getElementById('btnAdmin').classList.remove('hidden');
-  else document.getElementById('btnAdmin').classList.add('hidden');
+  if (currentUser) {
+    document.getElementById('dispUsername').textContent = currentUser.username;
+    document.getElementById('dispCredits').textContent = currentUser.charCredits.toLocaleString();
+    document.getElementById('dispPoints').textContent = currentUser.points.toLocaleString();
+    document.getElementById('creditsBox').style.display = '';
+    document.getElementById('btnLogout').style.display = '';
+    document.getElementById('btnLoginHeader').style.display = 'none';
+    if (currentUser.role === 'admin') document.getElementById('btnAdmin').classList.remove('hidden');
+    else document.getElementById('btnAdmin').classList.add('hidden');
+  } else {
+    document.getElementById('dispUsername').textContent = '游客模式';
+    document.getElementById('creditsBox').style.display = 'none';
+    document.getElementById('btnLogout').style.display = 'none';
+    document.getElementById('btnLoginHeader').style.display = '';
+    document.getElementById('btnAdmin').classList.add('hidden');
+  }
   showPage('app');
+}
+
+// ============ 游客模式 ============
+function enterAsGuest() {
+  token = null; currentUser = null;
+  localStorage.removeItem('token');
+  enterApp();
 }
 
 // ============ 刷新用户信息 ============
@@ -601,7 +626,7 @@ async function callTranslateAPI(model, prompt, charCount) {
     body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0.3, max_tokens: 4096, charCount }),
   });
   if (data.error) throw new Error(typeof data.error === 'string' ? data.error : data.message || '翻译失败');
-  if (data.charCredits !== undefined) {
+  if (data.charCredits !== undefined && data.charCredits !== null && currentUser) {
     currentUser.charCredits = data.charCredits;
     currentUser.points = data.points;
     document.getElementById('dispCredits').textContent = data.charCredits.toLocaleString();
@@ -613,7 +638,7 @@ async function callTranslateAPI(model, prompt, charCount) {
 async function startTranslation() {
   if (!parsedBlocks.length || isTranslating) return;
   const totalChars = parsedBlocks.reduce((s, b) => s + b.text.length, 0);
-  if (currentUser.role !== 'admin' && currentUser.charCredits < totalChars) {
+  if (currentUser && currentUser.role !== 'admin' && currentUser.charCredits < totalChars) {
     showToast(`字符点数不足！需要 ${totalChars} 点，当前仅 ${currentUser.charCredits} 点`, 'error'); return;
   }
 
@@ -830,7 +855,9 @@ function showToast(msg, type = 'info') {
   if (token) {
     const { data } = await api('/api/user/me');
     if (!data.error) { currentUser = data; enterApp(); return; }
+    token = null; localStorage.removeItem('token');
   }
+  // 默认显示登录页，用户可以点"跳过"
   showPage('login');
 })();
 </script>

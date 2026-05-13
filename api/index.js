@@ -146,19 +146,22 @@ export async function POST(req) {
 
   // ---------- AI 翻译 ----------
   if (url.pathname === '/api/translate') {
-    const auth = req.headers.get('authorization');
-    if (!auth || !auth.startsWith('Bearer ')) return json({ error: '未登录' }, 401);
-    const token = auth.slice(7);
-    const jwtPayload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-
-    const users = await supabaseQuery('users', { id: `eq.${jwtPayload.id}` });
-    const user = users && users[0];
-    if (!user) return json({ error: '用户不存在' }, 404);
-
     const { model, messages, temperature, max_tokens, charCount } = body;
     const cost = charCount || 0;
 
-    if (cost > 0 && user.role !== 'admin') {
+    // 尝试获取登录用户
+    let user = null;
+    const auth = req.headers.get('authorization');
+    if (auth && auth.startsWith('Bearer ')) {
+      const jwtPayload = await verifyJwt(auth.slice(7));
+      if (jwtPayload) {
+        const users = await supabaseQuery('users', { id: `eq.${jwtPayload.id}` });
+        user = users && users[0];
+      }
+    }
+
+    // 登录用户：检查余额
+    if (user && cost > 0 && user.role !== 'admin') {
       if (user.char_credits < cost) return json({ error: `字符点数不足，需要 ${cost} 点，当前仅 ${user.char_credits} 点` }, 400);
     }
 
@@ -177,8 +180,8 @@ export async function POST(req) {
       return json({ error: true, status: apiRes.status, data: apiData }, apiRes.status);
     }
 
-    // 扣费
-    if (cost > 0 && user.role !== 'admin') {
+    // 登录用户：扣费
+    if (user && cost > 0 && user.role !== 'admin') {
       await supabaseUpdate('users', { id: `eq.${user.id}` }, {
         char_credits: user.char_credits - cost,
         points: user.points + Math.floor(cost / 10),
@@ -187,7 +190,7 @@ export async function POST(req) {
       user.points += Math.floor(cost / 10);
     }
 
-    return json({ error: false, data: apiData, charCredits: user.char_credits, points: user.points });
+    return json({ error: false, data: apiData, charCredits: user ? user.char_credits : null, points: user ? user.points : null, anonymous: !user });
   }
 
   // ---------- 管理员：获取用户列表 ----------
